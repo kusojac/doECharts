@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Volleyball 3D Stats</title>
+<style>
+body{margin:0;font-family:sans-serif;}
+#toolbar{position:fixed;top:10px;left:10px;z-index:10;}
+#toolbar button{margin-right:5px;}
+#charts{display:flex;width:100vw;height:100vh;}
+#chart-manual,#chart-data{flex:1;height:100%;}
+#coord{position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.5);color:#fff;padding:5px;font-size:12px;}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="reset">↻ Reset view</button>
+  <button id="toggle">⟳ Toggle 2D/3D</button>
+</div>
+<div id="coord">x:0 y:0</div>
+<div id="charts">
+  <div id="chart-manual"></div>
+  <div id="chart-data"></div>
+</div>
+<script src="https://unpkg.com/echarts@5/dist/echarts.min.js"></script>
+<script src="https://unpkg.com/echarts-gl@2/dist/echarts-gl.min.js"></script>
+<script type="application/json" id="datajson">
+{
+  "players": [
+    { "id": 1, "name": "S",   "number": 13, "pos": [1.5, 7.5, 0] },
+    { "id": 2, "name": "OH1", "number": 17, "pos": [3.5, 6.0, 0] },
+    { "id": 3, "name": "MB1", "number":  3, "pos": [6.0, 7.5, 0] },
+    { "id": 4, "name": "OP",  "number":  9, "pos": [1.5, 1.5, 0] },
+    { "id": 5, "name": "OH2", "number": 20, "pos": [4.5, 3.0, 0] },
+    { "id": 6, "name": "MB2", "number":  7, "pos": [6.0, 1.5, 0] }
+  ],
+  "playerMoves": [
+    { "id": 2, "from": [3.5, 6.0, 0], "to": [4.0, 4.0, 0] },
+    { "id": 4, "from": [1.5, 1.5, 0], "to": [2.5, 3.5, 0] }
+  ],
+  "ballMoves": [
+    { "from": [1.5, 7.5, 3], "to": [8.5, 1.5, 3] }
+  ]
+}
+</script>
+<script>
+const courtZones = [];
+function addZone(x1,x2,y1,y2,color){
+  courtZones.push({x1,x2,y1,y2,color});
+}
+// Team A zones
+addZone(0,6,0,3,'#fce4ec');
+addZone(0,6,3,6,'#fff');
+addZone(0,6,6,9,'#fce4ec');
+addZone(6,9,0,3,'#e3f2fd');
+addZone(6,9,3,6,'#fff');
+addZone(6,9,6,9,'#e3f2fd');
+// Team B zones
+addZone(9,12,0,3,'#e3f2fd');
+addZone(9,12,3,6,'#fff');
+addZone(9,12,6,9,'#e3f2fd');
+addZone(12,18,0,3,'#fce4ec');
+addZone(12,18,3,6,'#fff');
+addZone(12,18,6,9,'#fce4ec');
+
+function zoneSeries(){
+  return courtZones.map(z=>({
+    type:'custom', coordinateSystem:'cartesian3D',
+    data:[[z.x1,z.y1,z.x2,z.y2,z.color]],
+    renderItem:function(params,api){
+      const x1=api.value(0), y1=api.value(1), x2=api.value(2), y2=api.value(3);
+      const p1=api.coord([x1,y1,0]);
+      const p2=api.coord([x2,y1,0]);
+      const p3=api.coord([x2,y2,0]);
+      const p4=api.coord([x1,y2,0]);
+      return {type:'polygon',shape:{points:[p1,p2,p3,p4]},style:{fill:api.value(4),stroke:'#999',lineWidth:1}};
+    }
+  }));
+}
+
+function linesForCourt(){
+  const lines=[];
+  function addLine(x1,y1,x2,y2){ lines.push([[x1,y1,0],[x2,y2,0]]); }
+  addLine(0,0,18,0); addLine(18,0,18,9); addLine(18,9,0,9); addLine(0,9,0,0); // outer
+  addLine(9,0,9,9); // net
+  addLine(6,0,6,9); addLine(12,0,12,9); // attack lines
+  addLine(0,3,18,3); addLine(0,6,18,6); // side zone lines
+  return [{type:'lines3D',coordinateSystem:'cartesian3D',data:lines,lineStyle:{color:'#000',width:1},effect:{show:false}}];
+}
+
+function baseOption(){
+  return {
+    tooltip:{show:false},
+    legend:{show:false},
+    xAxis3D:{min:0,max:18,type:'value',axisLine:{show:false},axisTick:{show:false},axisLabel:{show:false},splitLine:{show:false}},
+    yAxis3D:{min:0,max:9,type:'value',axisLine:{show:false},axisTick:{show:false},axisLabel:{show:false},splitLine:{show:false}},
+    zAxis3D:{min:0,max:5,type:'value',axisLine:{show:false},axisTick:{show:false},axisLabel:{show:false},splitLine:{show:false}},
+    grid3D:{boxHeight:0.5,light:{main:{intensity:0}},viewControl:{projection:'orthographic',alpha:90,beta:0},axisPointer:{show:false}},
+    series:[...zoneSeries(),...linesForCourt()]
+  };
+}
+
+const chartManual = echarts.init(document.getElementById('chart-manual'));
+const chartData = echarts.init(document.getElementById('chart-data'));
+chartManual.setOption(baseOption());
+chartData.setOption(baseOption());
+
+let players = JSON.parse(document.getElementById('datajson').textContent).players;
+const playerGraphics=[];
+
+function updateManualSeries(){
+  const scatterData = players.map(p=>({name:p.number,value:p.pos}));
+  const series=[{type:'scatter3D',symbol:'circle',symbolSize:20,itemStyle:{color:'blue'},label:{show:true,formatter: p=>p.data.name,position:'inside'}},
+    {type:'lines3D',data:playerMoves.map(m=>[m.from,m.to]),lineStyle:{color:'green',width:2},effect:{show:true,symbol:'arrow',trailLength:0,period:4}}];
+  const ballSeries={type:'lines3D',data:ballMoves.map(m=>[m.from,m.to]),lineStyle:{color:'orange',width:4},effect:{show:true,symbol:'arrow',trailLength:0,period:4}};
+}
+
+// Build manual graphics
+function buildGraphics(){
+  chartManual.setOption({series:[{type:'scatter3D',data:players.map(p=>p.pos),label:{show:false},itemStyle:{color:'transparent'}}]}, false);
+  players.forEach((p,i)=>{
+    const g = new echarts.graphic.Group({position:[0,0],draggable:true,cursor:'move'});
+    const circle = new echarts.graphic.Circle({shape:{cx:0,cy:0,r:10},style:{fill:'blue'}});
+    const text = new echarts.graphic.Text({style:{text:p.number,fill:'#fff',x:-5,y:-7}});
+    g.add(circle); g.add(text);
+    g.on('dragstart',function(){
+      p.prev = p.pos.slice();
+    });
+    g.on('drag', function(){
+      const coord = chartManual.convertFromPixel({xAxis3DIndex:0,yAxis3DIndex:0,zAxis3DIndex:0}, this.position);
+      p.pos=[coord[0],coord[1],0];
+      updateCoord(coord);
+    });
+    g.on('dragend', function(){
+      playerMoves.push({id:p.id,from:p.prev,to:p.pos.slice()});
+      updateLines();
+    });
+    chartManual.getZr().add(g);
+    playerGraphics.push(g);
+  });
+  updateGraphicPositions();
+}
+
+function updateCoord(c){
+  document.getElementById('coord').textContent = `x:${c[0].toFixed(2)} y:${c[1].toFixed(2)}`;
+}
+
+function updateGraphicPositions(){
+  players.forEach((p,i)=>{
+    const px = chartManual.convertToPixel({xAxis3DIndex:0,yAxis3DIndex:0,zAxis3DIndex:0}, p.pos);
+    playerGraphics[i].attr({position:px});
+  });
+}
+
+chartManual.on('rendered', updateGraphicPositions);
+
+let playerMoves=[]; let ballMoves=[];
+function updateLines(){
+  const lineSeries = [{type:'lines3D',data:playerMoves.map(m=>[m.from,m.to]),lineStyle:{color:'green',width:2},effect:{show:true,symbol:'arrow',trailLength:0,period:4}}];
+  chartManual.setOption({series:[...zoneSeries(),...linesForCourt(),...lineSeries]}, true);
+}
+
+buildGraphics();
+
+// Data-driven chart
+function loadData(json){
+  const players=json.players||[];
+  const pMoves=json.playerMoves||[];
+  const bMoves=json.ballMoves||[];
+  const option=baseOption();
+  option.series.push({type:'scatter3D',data:players.map(p=>({value:p.pos,label:{show:true,formatter:p.number},itemStyle:{color:'blue'},symbolSize:20}))});
+  option.series.push({type:'lines3D',data:pMoves.map(m=>[m.from,m.to]),lineStyle:{color:'green',width:2},effect:{show:true,symbol:'arrow',trailLength:0,period:4}});
+  option.series.push({type:'lines3D',data:bMoves.map(m=>[m.from,m.to]),lineStyle:{color:'orange',width:4},effect:{show:true,symbol:'arrow',trailLength:0,period:4}});
+  chartData.setOption(option,true);
+}
+const initData=JSON.parse(document.getElementById('datajson').textContent);
+loadData(initData);
+
+// Drag-and-drop new JSON
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',e=>{
+  e.preventDefault();
+  const file=e.dataTransfer.files[0];
+  if(file){
+    const reader=new FileReader();
+    reader.onload=ev=>{ try{ const json=JSON.parse(ev.target.result); loadData(json); }catch(err){console.error(err);} };
+    reader.readAsText(file);
+  }
+});
+
+// Buttons
+const resetBtn=document.getElementById('reset');
+const toggleBtn=document.getElementById('toggle');
+resetBtn.onclick=function(){
+  [chartManual,chartData].forEach(ch=>{const vc=ch.getModel().getComponent('grid3D').get('viewControl');vc.alpha=90;vc.beta=0;ch.setOption({},false);});
+};
+toggleBtn.onclick=function(){
+  [chartManual,chartData].forEach(ch=>{const vc=ch.getModel().getComponent('grid3D').get('viewControl');vc.alpha = vc.alpha===90?45:90; ch.setOption({},false);});
+};
+</script>
+</body>
+</html>
